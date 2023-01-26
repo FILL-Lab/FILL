@@ -2,9 +2,9 @@ require("hardhat-deploy");
 require("hardhat-deploy-ethers");
 
 const ethers = require("ethers");
+const fa = require("@glif/filecoin-address");
 const util = require("util");
 const request = util.promisify(require("request"));
-const fa = require("@glif/filecoin-address");
 
 const DEPLOYER_PRIVATE_KEY = network.config.accounts[0];
 
@@ -37,11 +37,8 @@ const deployer = new ethers.Wallet(DEPLOYER_PRIVATE_KEY);
 module.exports = async ({ deployments }) => {
   const { deploy } = deployments;
 
-  console.log('i am in the script ....');
-  
   const priorityFee = await callRpc("eth_maxPriorityFeePerGas");
   const f4Address = fa.newDelegatedEthAddress(deployer.address).toString();
-  // Wraps Hardhat's deploy, logging errors to console.
   const deployLogError = async (title, obj) => {
     let ret;
     try {
@@ -56,14 +53,16 @@ module.exports = async ({ deployments }) => {
   console.log("Wallet Ethereum Address:", deployer.address);
   console.log("Wallet f4Address: ", f4Address);
   const chainId = network.config.chainId;
-  console.log("deploying FLE");
-  await deployLogError("FLE", {
+  const tokenFLEAddr = "YOUR_FLE_TOKEN_ADDR";
+  console.log("deploying FILL");
+
+  await deployLogError("FILL", {
     from: deployer.address,
-    args: ["FLE", "FLE"],
-    // maxPriorityFeePerGas to instruct hardhat to use EIP-1559 tx format
+    args: [tokenFLEAddr],
     maxPriorityFeePerGas: priorityFee,
     log: true,
   });
 };
 
-module.exports.tags = ["FLE"];
+module.exports.tags = ["FILL"];
+module.exports.dependencies = ["FLE"];

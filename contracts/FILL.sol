@@ -2,37 +2,38 @@
 pragma solidity 0.8.17;
 
 import "./Utils/Context.sol";
+import "./FLE.sol";
 
 contract FILL is Context {
     mapping(address => uint256) private balances;
     mapping(address => uint256) private borrows;
     address private _owner;
-    address private _feeAddr;
+    FLE _tokenFLE;
 
     event Deposit(address indexed accountAddress, uint256 amount);
     event Borrow(address indexed accountAddress, uint256 amount);
 
-    constructor() {
+    constructor(address fleAddress) {
+        _tokenFLE = FLE(fleAddress);
         _owner = _msgSender();
     }
 
     function deposit(uint256 amount) public payable returns (uint256) {
         require(msg.value >= amount, "invalid amount");
-        balances[_msgSender()] += msg.value;
-        emit Deposit(_msgSender(), msg.value);
-        return balances[_msgSender()];
+
+        _tokenFLE.mint(_msgSender(), amount);
+        return _tokenFLE.balanceOf(_msgSender());
     }
 
     function withdraw(uint256 amount) public returns (uint256) {
-        if (amount <= balances[_msgSender()]) {
-            balances[_msgSender()] -= amount;
-            payable(_msgSender()).transfer(amount);
-        }
-        return balances[_msgSender()];
+
+        _tokenFLE.burn(_msgSender(), amount);
+        payable(_msgSender()).transfer(amount);
+        return _tokenFLE.balanceOf(_msgSender());
     }
 
     function balanceOf() public view returns (uint256) {
-        return balances[_msgSender()];
+        return _tokenFLE.balanceOf(_msgSender());
     }
 
     modifier noArrears(address _addr) {
@@ -61,4 +62,5 @@ contract FILL is Context {
     function depositsBalance() public view returns (uint256) {
         return address(this).balance;
     }
+
 }
