@@ -1,4 +1,2 @@
-# FILL
-
-## A Filecoin Liquidity Pool for Storage Providers
+Please find [FILL_Doc](https://github.com/FILL-Lab/FILL_doc) for the concept paper.
 
