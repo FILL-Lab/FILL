@@ -17,9 +17,9 @@ interface FILLInterface {
         uint256 amount; //borrow amount
         bytes minerAddr; //miner
         uint256 interestRate; // interest rate
-        uint256 borrowTime;
-        uint256 paybackTime;
-        bool isPayback;
+        uint256 borrowTime; // borrow time
+        uint256 paybackTime; // payback time
+        bool isPayback; // flag for status
     }
     struct MinerStackInfo {
         bytes minerAddr;
@@ -215,9 +215,7 @@ contract FILL is Context, FILLInterface {
     mapping(bytes => address) private minerBindsMap;
     bytes[] bindKeys;
     mapping(bytes => MinerStackInfo) private minerStacks;
-    // mapping(uint256 => BorrowInfo) private borrows;
     BorrowInfo[] private borrows;
-    uint256 private _borrowCount;
 
     address private _owner;
     uint256 private _accumulatedDepositFIL;
@@ -232,7 +230,6 @@ contract FILL is Context, FILLInterface {
     uint256 private _exchangeRate; // FIL/FLE=_exchangeRate/DEFAULT_RATE_BASE
     uint256 private _interestRate; // interestRate=_interestRate/DEFAULT_RATE_BASE
     uint256 private _utilizationRate; //
-
     FLE _tokenFLE;
 
     constructor(address fleAddr) {
@@ -271,7 +268,6 @@ contract FILL is Context, FILLInterface {
         _accumulatedRedeemFIL += amountFIL;
 
         emit Redeem(_msgSender(), amountFLE, amountFIL);
-
         return amountFIL;
     }
 
@@ -290,23 +286,24 @@ contract FILL is Context, FILLInterface {
             "not enough to borow"
         );
         // add a borrow
-        borrows[_borrowCount] = BorrowInfo({
-            id: _borrowCount,
-            account: _msgSender(),
-            amount: amount,
-            minerAddr: minerAddr,
-            interestRate: interest_rate,
-            borrowTime: block.timestamp,
-            paybackTime: 0,
-            isPayback: false
-        });
-        _borrowCount++;
+        borrows.push(
+            BorrowInfo({
+                id: borrows.length,
+                account: _msgSender(),
+                amount: amount,
+                minerAddr: minerAddr,
+                interestRate: interest_rate,
+                borrowTime: block.timestamp,
+                paybackTime: 0,
+                isPayback: false
+            })
+        );
         minerStacks[minerAddr].borrowCount += amount;
         _accumulatedBorrowFIL += amount;
         // send fil to miner
         SendAPI.send(minerAddr, amount);
 
-        emit Borrow(_borrowCount - 1, _msgSender(), minerAddr, amount);
+        emit Borrow(borrows.length - 1, _msgSender(), minerAddr, amount);
         return amount;
     }
 
