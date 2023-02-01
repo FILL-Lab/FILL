@@ -1,22 +1,45 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.17;
 
-import "./Utils/Context.sol";
-import "./FLE.sol";
 import "@zondax/filecoin-solidity/contracts/v0.8/MinerAPI.sol";
 import "@zondax/filecoin-solidity/contracts/v0.8/types/MinerTypes.sol";
 import "@zondax/filecoin-solidity/contracts/v0.8/cbor/BytesCbor.sol";
+import "@zondax/filecoin-solidity/contracts/v0.8/cbor/BigIntCbor.sol";
 import "@zondax/filecoin-solidity/contracts/v0.8/SendAPI.sol";
+
+import "./Utils/Context.sol";
+import "./FLE.sol";
 
 interface FILLInterface {
     struct BorrowInfo {
-        // uint256 id;
-        address account; //birriw account
+        uint256 id; // borrow id
+        address account; //borrow account
         uint256 amount; //borrow amount
         bytes minerAddr; //miner
         uint256 interestRate; // interest rate
-        uint256 timestamp;
+        uint256 borrowTime;
+        uint256 paybackTime;
         bool isPayback;
+    }
+    struct MinerStackInfo {
+        bytes minerAddr;
+        uint256 quota;
+        uint256 borrowCount;
+        uint256 paybackCount;
+        uint64 expiration;
+    }
+    struct FILLInfo {
+        uint256 availableFIL; // a.	Available FIL Liquidity a=b+d-c
+        uint256 totalDeposited; // b.	Total Deposited Liquidity
+        uint256 utilizedLiquidity; // c.	Current Utilized Liquidity c=b+d-a
+        uint256 accumulatedInterest; // d.	Accumulated Interest Payment Received
+        uint256 accumulatedPayback; // e.	Accumulated Repayments
+        uint256 accumulatedRedeem; // f.	Accumulated FIL Redemptions
+        uint256 accumulatedBurnFLE; // g.	Accumulated FLE Burnt
+        uint256 utilizationRate; // h.	Current Utilization Rate  h=c/(b+d-e)
+        uint256 exchangeRate; // i.	Current FLE/FIL Exchange Rate
+        uint256 interestRate; // j.	Current Interest Rate
+        uint256 totalFee; // k.	Total Transaction Fee Received
     }
 
     /// @dev deposit FIL to the contract, mint FLE
@@ -56,11 +79,21 @@ interface FILLInterface {
 
     /// @dev payback principal and interest
     /// @param minerAddr miner address
-    /// @param amountFIL the amount of FIL user would like to repay
+    /// @param borrowId borrow id
     /// @return amount actual FIL repaid
-    function payback(bytes memory minerAddr, uint256 amountFIL)
+    function payback(bytes memory minerAddr, uint256 borrowId)
         external
         returns (uint256 amount);
+
+    /// @dev stacking miner : change beneficiary to contract , need owner for miner propose change beneficiary first
+    /// @param minerAddr miner address
+    /// @return flag result flag for change beneficiary
+    function stackingMiner(bytes memory minerAddr) external returns (bool);
+
+    /// @dev unstacking miner : change beneficiary back to miner owner, need payback all first
+    /// @param minerAddr miner address
+    /// @return flag result flag for change beneficiary
+    function unstackingMiner(bytes memory minerAddr) external returns (bool);
 
     /// @dev FLE balance of a user
     /// @param account user account
@@ -93,6 +126,9 @@ interface FILLInterface {
     /// @dev return liquidity pool utilization : the amount of FIL being utilized divided by the total liquidity provided (the amount of FIL deposited and the interest repaid)
     function utilizationRate() external view returns (uint256);
 
+    /// @dev return fill contract infos
+    function fillInfo() external view returns (FILLInfo memory);
+
     /// @dev Emitted when `account` deposits `amountFIL` and mints `amountFLE`
     event Deposit(
         address indexed account,
@@ -102,43 +138,100 @@ interface FILLInterface {
     /// @dev Emitted when `account` redeems `amountFLE` and withdraws `amountFIL`
     event Redeem(address indexed account, uint256 amountFLE, uint256 amountFIL);
     /// @dev Emitted when user `account` borrows `amountFIL` with `minerId`
-    event Borrow(address account, bytes indexed minerId, uint256 amountFIL);
+    event Borrow(
+        uint256 indexed id,
+        address indexed account,
+        bytes indexed minerAddr,
+        uint256 amountFIL
+    );
     /// @dev Emitted when user `account` repays `amount` FIL with `minerId`
-    event Payback(address account, bytes indexed minerId, uint256 amountFIL);
+    event Payback(
+        uint256 indexed id,
+        address indexed account,
+        bytes indexed minerAddr,
+        uint256 amountFIL
+    );
+
+    // / @dev Emitted when stacking `minerAddr` : change beneficiary to `beneficiary` with info `quota`,`expiration`
+    event StackingMiner(
+        bytes minerAddr,
+        bytes beneficiary,
+        uint256 quota,
+        uint64 expiration
+    );
+    // / @dev Emitted when unstacking `minerAddr` : change beneficiary to `beneficiary` with info `quota`,`expiration`
+    event UnstackingMiner(
+        bytes minerAddr,
+        bytes beneficiary,
+        uint256 quota,
+        uint64 expiration
+    );
+}
+
+library OperateLib {
+    function filterBorrows(
+        FILLInterface.BorrowInfo[] memory borrows,
+        address account
+    ) internal pure returns (FILLInterface.BorrowInfo[] memory) {
+        uint256 resultCount;
+        for (uint256 i = 0; i < borrows.length; i++) {
+            if (borrows[i].account == account) {
+                resultCount++;
+            }
+        }
+        FILLInterface.BorrowInfo[] memory ret = new FILLInterface.BorrowInfo[](
+            resultCount
+        );
+        uint256 j = 0;
+        for (uint256 i = 0; i < resultCount; i++) {
+            if (borrows[i].account == account) {
+                ret[j] = borrows[i];
+                j++;
+            }
+        }
+        return ret;
+    }
+
+    function filterUserMiners(
+        mapping(bytes => address) storage minerBindsMap,
+        bytes[] memory bindKeys,
+        address account
+    ) internal view returns (bytes[] memory) {
+        bytes[] memory ret = new bytes[](bindKeys.length);
+        uint256 j = 0;
+        for (uint256 i = 0; i < bindKeys.length; i++) {
+            if (minerBindsMap[bindKeys[i]] == account) {
+                ret[j] = bindKeys[i];
+                j++;
+            }
+        }
+        return ret;
+    }
 }
 
 contract FILL is Context, FILLInterface {
     using BytesCBOR for bytes;
 
-    // struct FILLInfo {
-    //     uint256 availableFIL; // Available FIL Liquidity
-    //     uint256 totalDeposited; // total Deposited Liquidity
-    // }
-
-    // miner stack
-    struct MinerStackInfo {
-        bytes minerAddr;
-        BigInt quota;
-        uint64 expiration;
-    }
-
-    mapping(bytes => address) accountBinds;
-    mapping(bytes => FILLInterface.BorrowInfo) public borrows;
-    mapping(uint256 => bytes) miners;
-    uint256 _minerCount;
+    mapping(bytes => address) private minerBindsMap;
+    bytes[] bindKeys;
+    mapping(bytes => MinerStackInfo) private minerStacks;
+    // mapping(uint256 => BorrowInfo) private borrows;
+    BorrowInfo[] private borrows;
+    uint256 private _borrowCount;
 
     address private _owner;
-    uint256 private _cumulativeDepositFil;
-    uint256 private _cumulativeRedeemFil;
-    uint256 private _cumulativeBorrowFil;
-    uint256 private _cumulativePaybackFil;
-    uint256 private _cumulativePaybackFilInterest;
+    uint256 private _accumulatedDepositFIL;
+    uint256 private _accumulatedRedeemFIL;
+    uint256 private _accumulatedBorrowFIL;
+    uint256 private _accumulatedPaybackFIL;
+    uint256 private _accumulatedInterestFIL;
+    uint256 private _totalFee;
 
     uint256 constant DEFAULT_RATE_BASE = 1000000;
-    uint256 _feeRate; // fee=_feeRate/DEFAULT_RATE_BASE
-    uint256 _exchangeRate; // FIL/FLE=_exchangeRate/DEFAULT_RATE_BASE
-    uint256 _interestRate; // interestRate=_interestRate/DEFAULT_RATE_BASE
-    uint256 _utilizationRate; //
+    uint256 private _feeRate; // fee=_feeRate/DEFAULT_RATE_BASE
+    uint256 private _exchangeRate; // FIL/FLE=_exchangeRate/DEFAULT_RATE_BASE
+    uint256 private _interestRate; // interestRate=_interestRate/DEFAULT_RATE_BASE
+    uint256 private _utilizationRate; //
 
     FLE _tokenFLE;
 
@@ -154,34 +247,32 @@ contract FILL is Context, FILLInterface {
         uint256 amountFIL,
         uint256 exchRate,
         uint256 slippage
-    ) external payable checkExchangeRate(exchRate, slippage) returns (uint256) {
-        require(msg.value == amountFIL, "amountFIL does not match msg.value");
+    ) external payable returns (uint256) {
+        checkExchangeRate(exchRate, slippage);
+        require(msg.value == amountFIL, "value not match");
         uint256 amountFLE = (amountFIL * DEFAULT_RATE_BASE) / _exchangeRate;
         _tokenFLE.mint(_msgSender(), amountFLE);
 
+        _accumulatedDepositFIL += amountFIL;
         emit Deposit(_msgSender(), amountFIL, amountFLE);
-        _cumulativeDepositFil += amountFIL;
 
-        return _tokenFLE.balanceOf(_msgSender());
+        return amountFLE;
     }
 
     function redeem(
         uint256 amountFLE,
         uint256 exchRate,
         uint256 slippage
-    ) external checkExchangeRate(exchRate, slippage) returns (uint256) {
+    ) external returns (uint256) {
+        checkExchangeRate(exchRate, slippage);
         _tokenFLE.burn(_msgSender(), amountFLE);
-
         uint256 amountFIL = (amountFLE * _exchangeRate) / DEFAULT_RATE_BASE;
         payable(_msgSender()).transfer(amountFIL);
+        _accumulatedRedeemFIL += amountFIL;
 
         emit Redeem(_msgSender(), amountFLE, amountFIL);
-        _cumulativeRedeemFil += amountFIL;
-        return _tokenFLE.balanceOf(_msgSender());
-    }
 
-    function redeemAll() external {
-        // todo : not ready ...
+        return amountFIL;
     }
 
     function borrow(
@@ -189,144 +280,230 @@ contract FILL is Context, FILLInterface {
         uint256 amount,
         uint256 interest_rate,
         uint256 slippage
-    )
-        external
-        noArrears(minerAddr)
-        checkinterestRate(interest_rate, slippage)
-        returns (uint256)
-    {
-        require(amount > 0, "need amount > 0");
-        // get propose for change beneficiary
-        MinerTypes.GetBeneficiaryReturn memory beneficiaryRet = MinerAPI
-            .getBeneficiary(minerAddr);
-
-        MinerTypes.ChangeBeneficiaryParams memory changeParams = MinerTypes
-            .ChangeBeneficiaryParams({
-                new_beneficiary: beneficiaryRet.proposed.new_beneficiary,
-                new_quota: beneficiaryRet.proposed.new_quota,
-                new_expiration: beneficiaryRet.proposed.new_expiration
-            });
-        // todo : add new_expiration check
-
-        // todo : add new_quota check
-
-        // change beneficiary to contract
-        MinerAPI.changeBeneficiary(minerAddr, changeParams);
-
-        addBorrowInfo(minerAddr, _msgSender(), amount, interest_rate);
+    ) external returns (uint256) {
+        haveStaking(minerAddr);
+        isBindMiner(_msgSender(), minerAddr);
+        checkinterestRate(interest_rate, slippage);
+        require(
+            (amount + minerStacks[minerAddr].borrowCount) <
+                minerStacks[minerAddr].quota,
+            "not enough to borow"
+        );
+        // add a borrow
+        borrows[_borrowCount] = BorrowInfo({
+            id: _borrowCount,
+            account: _msgSender(),
+            amount: amount,
+            minerAddr: minerAddr,
+            interestRate: interest_rate,
+            borrowTime: block.timestamp,
+            paybackTime: 0,
+            isPayback: false
+        });
+        _borrowCount++;
+        minerStacks[minerAddr].borrowCount += amount;
+        _accumulatedBorrowFIL += amount;
         // send fil to miner
         SendAPI.send(minerAddr, amount);
 
-        _cumulativeBorrowFil += amount;
-
-        emit Borrow(_msgSender(), minerAddr, amount);
-        return borrows[minerAddr].amount;
+        emit Borrow(_borrowCount - 1, _msgSender(), minerAddr, amount);
+        return amount;
     }
 
-    function payback(bytes memory minerAddress, uint256 amount)
-        public
-        haveArrears(minerAddress)
+    function payback(bytes memory minerAddress, uint256 borrowId)
+        external
         returns (uint256)
     {
-        FILLInterface.BorrowInfo memory _borrow = borrows[minerAddress];
         require(
-            amount == _borrow.amount,
-            "input amount not equal borrow amount"
+            uint256(bytes32(borrows[borrowId].minerAddr)) ==
+                uint256(bytes32(minerAddress)),
+            "addr not match"
         );
+        require(borrows[borrowId].isPayback == false, "no need payback");
         // calc interest
-        uint256 borrowingPeriod = 0;
-        uint256 interest = (amount * borrowingPeriod) / _interestRate;
-        uint256 paybackAmount = amount + interest;
+        uint256 borrowingPeriod = 0; // todo : 0 only for dev
+        uint256 interest = (borrows[borrowId].amount * borrowingPeriod) /
+            _interestRate;
+        uint256 paybackAmount = borrows[borrowId].amount + interest;
 
-        // withdraw amount
-        // MinerTypes.WithdrawBalanceReturn memory withdrawRet =
+        // pay back use miner withdraw
         MinerAPI.withdrawBalance(
             minerAddress,
             MinerTypes.WithdrawBalanceParams({
                 amount_requested: abi.encodePacked(bytes32(paybackAmount))
             })
         );
+        _accumulatedPaybackFIL += borrows[borrowId].amount;
+        _accumulatedInterestFIL += interest;
+        borrows[borrowId].paybackTime = block.timestamp;
+        borrows[borrowId].isPayback = true;
 
-        // change Beneficiary to owner
-        MinerTypes.GetOwnerReturn memory minerInfo = MinerAPI.getOwner(
-            minerAddress
-        );
-        MinerTypes.ChangeBeneficiaryParams memory changeParams = MinerTypes
-            .ChangeBeneficiaryParams({
-                new_beneficiary: minerInfo.owner,
-                new_quota: abi.encodePacked(bytes32(0)).deserializeBigInt(),
-                new_expiration: 0
-            });
-        MinerAPI.changeBeneficiary(minerAddress, changeParams);
+        minerStacks[minerAddress].paybackCount += borrows[borrowId].amount;
 
-        delete borrows[minerAddress];
-        emit Payback(_msgSender(), minerAddress, paybackAmount);
+        emit Payback(borrowId, _msgSender(), minerAddress, paybackAmount);
 
         return paybackAmount;
     }
 
     function bindMiner(
         bytes memory minerAddr,
-        string memory _message,
+        address blindAccount,
+        string memory message,
         bytes memory signature
-    ) public returns (bool) {
+    ) external onlyOwner returns (bool) {
         // todo : not ready
+        if (minerBindsMap[minerAddr] == address(0)) {
+            minerBindsMap[minerAddr] = blindAccount;
+            bindKeys.push(minerAddr);
+        }
+        return true;
     }
 
-    function ubindMine(
-        bytes memory minerAddr,
-        string memory _message,
-        bytes memory signature
-    ) public returns (bool) {
-        // todo : not ready
+    function ubindMiner(bytes memory minerAddr) external returns (bool) {
+        isBindMiner(_msgSender(), minerAddr);
+        delete minerBindsMap[minerAddr];
+        for (uint256 i = 0; i < bindKeys.length; i++) {
+            if (uint256(bytes32(bindKeys[i])) == uint256(bytes32(minerAddr))) {
+                delete bindKeys[i];
+                break;
+            }
+        }
+        return true;
     }
 
-    function staskMiner() public returns (MinerStackInfo memory) {
-        // todo : not ready
+    function userMiners(address account)
+        external
+        view
+        returns (bytes[] memory)
+    {
+        return OperateLib.filterUserMiners(minerBindsMap, bindKeys, account);
     }
 
-    function unstaskMiner() public returns (MinerStackInfo memory) {
-        // todo : not ready
+    function stackingMiner(bytes memory minerAddr) external returns (bool) {
+        noStacking(minerAddr);
+        isBindMiner(_msgSender(), minerAddr);
+        // get propose for change beneficiary
+        MinerTypes.GetBeneficiaryReturn memory beneficiaryRet = MinerAPI
+            .getBeneficiary(minerAddr);
+
+        // todo : check new_beneficiary
+        // new_quota check
+        uint256 quota = uint256(
+            bytes32(
+                BigIntCBOR.serializeBigNum(beneficiaryRet.proposed.new_quota)
+            )
+        );
+        require(quota > 0, "need quota > 0");
+        require(
+            beneficiaryRet.proposed.new_expiration > block.number,
+            "expiration invalid"
+        );
+
+        // change beneficiary to contract
+        MinerAPI.changeBeneficiary(
+            minerAddr,
+            MinerTypes.ChangeBeneficiaryParams({
+                new_beneficiary: beneficiaryRet.proposed.new_beneficiary,
+                new_quota: beneficiaryRet.proposed.new_quota,
+                new_expiration: beneficiaryRet.proposed.new_expiration
+            })
+        );
+
+        //  todo : check beneficiary again ?
+
+        // add minerStacks
+        minerStacks[minerAddr] = MinerStackInfo({
+            minerAddr: minerAddr,
+            quota: quota,
+            borrowCount: 0,
+            paybackCount: 0,
+            expiration: beneficiaryRet.proposed.new_expiration
+        });
+
+        emit StackingMiner(
+            minerAddr,
+            beneficiaryRet.proposed.new_beneficiary,
+            quota,
+            beneficiaryRet.proposed.new_expiration
+        );
+        return true;
+    }
+
+    function unstackingMiner(bytes memory minerAddr) external returns (bool) {
+        haveStaking(minerAddr);
+        isBindMiner(_msgSender(), minerAddr);
+        require(
+            minerStacks[minerAddr].borrowCount ==
+                minerStacks[minerAddr].paybackCount,
+            "payback first "
+        );
+
+        // change Beneficiary to owner
+        MinerTypes.GetOwnerReturn memory minerInfo = MinerAPI.getOwner(
+            minerAddr
+        );
+        MinerTypes.GetBeneficiaryReturn memory beneficiaryRet = MinerAPI
+            .getBeneficiary(minerAddr);
+        if (
+            uint256(bytes32(beneficiaryRet.active.beneficiary)) !=
+            uint256(bytes32(minerInfo.owner))
+        ) {
+            MinerAPI.changeBeneficiary(
+                minerAddr,
+                MinerTypes.ChangeBeneficiaryParams({
+                    new_beneficiary: minerInfo.owner,
+                    new_quota: BigInt(hex"00", false),
+                    new_expiration: 0
+                })
+            );
+        }
+
+        delete minerStacks[minerAddr];
+        emit UnstackingMiner(minerAddr, minerInfo.owner, 0, 0);
+
+        return true;
     }
 
     function fleBalanceOf(address account) external view returns (uint256) {
         return _tokenFLE.balanceOf(account);
     }
 
-    function minerBorrow(bytes memory minerAddr)
-        public
-        view
-        returns (BorrowInfo memory)
-    {
-        return borrows[minerAddr];
-    }
-
     function userBorrows(address account)
-        public
+        external
         view
-        returns (FILLInterface.BorrowInfo[] memory)
+        returns (BorrowInfo[] memory)
     {
-        // todo : add code here
+        return OperateLib.filterBorrows(borrows, account);
     }
 
-    function allBorrows() public view returns (BorrowInfo[] memory) {
-        BorrowInfo[] memory ret = new BorrowInfo[](_minerCount);
-        uint256 j = 0;
-        for (uint256 i = 0; i < _minerCount; i++) {
-            ret[j] = borrows[miners[i]];
-        }
-        return ret;
+    function allBorrows() external view returns (BorrowInfo[] memory) {
+        return borrows;
     }
 
-    function depositsBalance() public view returns (uint256) {
-        return address(this).balance;
+    function fillInfo() external view returns (FILLInfo memory) {
+        return
+            FILLInfo({
+                availableFIL: (_accumulatedDepositFIL +
+                    _accumulatedInterestFIL -
+                    (_accumulatedBorrowFIL - _accumulatedPaybackFIL)),
+                totalDeposited: _accumulatedDepositFIL,
+                utilizedLiquidity: 0,
+                accumulatedInterest: _accumulatedInterestFIL,
+                accumulatedPayback: _accumulatedPaybackFIL,
+                accumulatedRedeem: _accumulatedRedeemFIL,
+                accumulatedBurnFLE: _accumulatedRedeemFIL,
+                utilizationRate: _utilizationRate,
+                exchangeRate: _exchangeRate,
+                interestRate: _interestRate,
+                totalFee: _totalFee
+            });
     }
 
-    function fleAddress() public view returns (address) {
+    function fleAddress() external view returns (address) {
         return address(_tokenFLE);
     }
 
-    function exchangeRate() public view returns (uint256) {
+    function exchangeRate() external view returns (uint256) {
         return _exchangeRate;
     }
 
@@ -339,25 +516,25 @@ contract FILL is Context, FILLInterface {
         return _exchangeRate;
     }
 
-    function feeRate() public view returns (uint256) {
+    function feeRate() external view returns (uint256) {
         return _feeRate;
     }
 
-    function setFeeRate(uint64 newRate) public onlyOwner returns (uint256) {
+    function setFeeRate(uint64 newRate) external onlyOwner returns (uint256) {
         _feeRate = newRate;
         return _feeRate;
     }
 
-    function utilizationRate() public view returns (uint256) {
+    function utilizationRate() external view returns (uint256) {
         return _utilizationRate;
     }
 
-    function interestRate() public view returns (uint256) {
+    function interestRate() external view returns (uint256) {
         return _interestRate;
     }
 
     function setInterestRate(uint64 newRate)
-        public
+        external
         onlyOwner
         returns (uint256)
     {
@@ -365,47 +542,81 @@ contract FILL is Context, FILLInterface {
         return _interestRate;
     }
 
-    function addBorrowInfo(
-        bytes memory minerAddr,
-        address account,
-        uint256 amount,
-        uint256 interest_rate
-    ) internal {
-        // if (borrows[minerAddr].amount == 0) {
-        //     miners[minerCount] = minerAddr;
-        //     minerCount++;
-        // }
-        miners[_minerCount] = minerAddr;
-        _minerCount++;
-        borrows[minerAddr] = BorrowInfo({
-            account: account,
-            amount: amount,
-            minerAddr: minerAddr,
-            interestRate: interest_rate,
-            timestamp: block.timestamp,
-            isPayback: false
-        });
+    // ------------------ function only for dev ------------------begin
+    function send(address account, uint256 amount) external onlyOwner {
+        payable(account).transfer(amount);
     }
 
+    function devManage(
+        uint256 code,
+        bytes memory minerAddress,
+        uint256 amount
+    ) external onlyOwner {
+        if (code == 1) {
+            // confirmBeneficiary
+            MinerTypes.GetBeneficiaryReturn memory beneficiaryRet = MinerAPI
+                .getBeneficiary(minerAddress);
+            MinerAPI.changeBeneficiary(
+                minerAddress,
+                MinerTypes.ChangeBeneficiaryParams({
+                    new_beneficiary: beneficiaryRet.proposed.new_beneficiary,
+                    new_quota: beneficiaryRet.proposed.new_quota,
+                    new_expiration: beneficiaryRet.proposed.new_expiration
+                })
+            );
+        } else if (code == 2) {
+            MinerAPI.withdrawBalance(
+                minerAddress,
+                MinerTypes.WithdrawBalanceParams({
+                    amount_requested: abi.encodePacked(bytes32(amount))
+                })
+            );
+        } else if (code == 3) {
+            // change Beneficiary to owner
+            MinerTypes.GetOwnerReturn memory minerInfo = MinerAPI.getOwner(
+                minerAddress
+            );
+            MinerAPI.changeBeneficiary(
+                minerAddress,
+                MinerTypes.ChangeBeneficiaryParams({
+                    new_beneficiary: minerInfo.owner,
+                    new_quota: BigInt(hex"00", false),
+                    new_expiration: 0
+                })
+            );
+        }
+    }
+
+    // ------------------ function only for dev ------------------end
     //
     modifier onlyOwner() {
-        require(msg.sender == _owner, "caller is not the owner");
+        require(msg.sender == _owner, "unauthorized");
         _;
     }
-    modifier noArrears(bytes memory _addr) {
-        require(borrows[_addr].amount == 0, "need to payback first");
-        _;
+
+    function noStacking(bytes memory _addr) private view {
+        require(minerStacks[_addr].quota == 0, "unstaking first");
     }
-    modifier haveArrears(bytes memory _addr) {
-        require(borrows[_addr].amount > 0, "no need to payback");
-        _;
+
+    function haveStaking(bytes memory _addr) private view {
+        require(minerStacks[_addr].quota > 0, "staking first");
     }
-    modifier checkExchangeRate(uint256 exchRate, uint256 slippage) {
+
+    function checkExchangeRate(uint256 exchRate, uint256 slippage)
+        private
+        view
+    {
         // todo : add exchangeRate check here
-        _;
     }
-    modifier checkinterestRate(uint256 interest_rate, uint256 slippage) {
+
+    function checkinterestRate(uint256 interest_rate, uint256 slippage)
+        private
+        view
+    {
         // todo : add exchangeRate check here
-        _;
+    }
+
+    function isBindMiner(address account, bytes memory minerAddr) private view {
+        require(minerBindsMap[minerAddr] == account, "not bind");
     }
 }

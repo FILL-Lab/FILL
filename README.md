@@ -6,13 +6,35 @@
 
 
 ```solidity
-interface FILLInterface {
     struct BorrowInfo {
-        address account; //birriw account
+        uint256 id; // borrow id
+        address account; //borrow account
         uint256 amount; //borrow amount
         bytes minerAddr; //miner
         uint256 interestRate; // interest rate
-        uint256 timestamp;
+        uint256 borrowTime;
+        uint256 paybackTime;
+        bool isPayback;
+    }
+    struct MinerStackInfo {
+        bytes minerAddr;
+        uint256 quota;
+        uint256 borrowCount;
+        uint256 paybackCount;
+        uint64 expiration;
+    }
+    struct FILLInfo {
+        uint256 availableFIL; // a.	Available FIL Liquidity a=b+d-c
+        uint256 totalDeposited; // b.	Total Deposited Liquidity
+        uint256 utilizedLiquidity; // c.	Current Utilized Liquidity c=b+d-a
+        uint256 accumulatedInterest; // d.	Accumulated Interest Payment Received
+        uint256 accumulatedPayback; // e.	Accumulated Repayments
+        uint256 accumulatedRedeem; // f.	Accumulated FIL Redemptions
+        uint256 accumulatedBurnFLE; // g.	Accumulated FLE Burnt
+        uint256 utilizationRate; // h.	Current Utilization Rate  h=c/(b+d-e)
+        uint256 exchangeRate; // i.	Current FLE/FIL Exchange Rate
+        uint256 interestRate; // j.	Current Interest Rate
+        uint256 totalFee; // k.	Total Transaction Fee Received
     }
 
     /// @dev deposit FIL to the contract, mint FLE
@@ -52,11 +74,21 @@ interface FILLInterface {
 
     /// @dev payback principal and interest
     /// @param minerAddr miner address
-    /// @param amountFIL the amount of FIL user would like to repay
+    /// @param borrowId borrow id
     /// @return amount actual FIL repaid
-    function payback(bytes memory minerAddr, uint256 amountFIL)
+    function payback(bytes memory minerAddr, uint256 borrowId)
         external
         returns (uint256 amount);
+
+    /// @dev stacking miner : change beneficiary to contract , need owner for miner propose change beneficiary first
+    /// @param minerAddr miner address
+    /// @return flag result flag for change beneficiary
+    function stackingMiner(bytes memory minerAddr) external returns (bool);
+
+    /// @dev unstacking miner : change beneficiary back to miner owner, need payback all first
+    /// @param minerAddr miner address
+    /// @return flag result flag for change beneficiary
+    function unstackingMiner(bytes memory minerAddr) external returns (bool);
 
     /// @dev FLE balance of a user
     /// @param account user account
@@ -89,6 +121,9 @@ interface FILLInterface {
     /// @dev return liquidity pool utilization : the amount of FIL being utilized divided by the total liquidity provided (the amount of FIL deposited and the interest repaid)
     function utilizationRate() external view returns (uint256);
 
+    /// @dev return fill contract infos
+    function fillInfo() external view returns (FILLInfo memory);
+
     /// @dev Emitted when `account` deposits `amountFIL` and mints `amountFLE`
     event Deposit(
         address indexed account,
@@ -98,8 +133,32 @@ interface FILLInterface {
     /// @dev Emitted when `account` redeems `amountFLE` and withdraws `amountFIL`
     event Redeem(address indexed account, uint256 amountFLE, uint256 amountFIL);
     /// @dev Emitted when user `account` borrows `amountFIL` with `minerId`
-    event Borrow(address account, bytes indexed minerId, uint256 amountFIL);
+    event Borrow(
+        uint256 indexed id,
+        address indexed account,
+        bytes indexed minerAddr,
+        uint256 amountFIL
+    );
     /// @dev Emitted when user `account` repays `amount` FIL with `minerId`
-    event Payback(address account, bytes indexed minerId, uint256 amountFIL);
-}
+    event Payback(
+        uint256 indexed id,
+        address indexed account,
+        bytes indexed minerAddr,
+        uint256 amountFIL
+    );
+
+    // / @dev Emitted when stacking `minerAddr` : change beneficiary to `beneficiary` with info `quota`,`expiration`
+    event StackingMiner(
+        bytes minerAddr,
+        bytes beneficiary,
+        uint256 quota,
+        uint64 expiration
+    );
+    // / @dev Emitted when unstacking `minerAddr` : change beneficiary to `beneficiary` with info `quota`,`expiration`
+    event UnstackingMiner(
+        bytes minerAddr,
+        bytes beneficiary,
+        uint256 quota,
+        uint64 expiration
+    );
 ```

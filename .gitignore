@@ -16,4 +16,5 @@ artifacts
 # tmp file 
 
 tmp.txt
+.tmp
 
