@@ -16,9 +16,8 @@
 //
 // DRAFT!! THIS CODE HAS NOT BEEN AUDITED - USE ONLY FOR PROTOTYPING
 //
-const util = require("util");
 const fa = require("@glif/filecoin-address");
-const request = util.promisify(require("request"));
+const { callRpc } = require("../common");
 
 task("miner-info", "")
   .addParam("contractaddress", "The MinerOp address")
@@ -27,25 +26,10 @@ task("miner-info", "")
     const { beneficiary, quota, expiration } = taskArgs;
     const networkId = network.name;
 
-    const priorityFee = await callRpc("eth_maxPriorityFeePerGas");
-
-    async function callRpc(method, params) {
-      var options = {
-        method: "POST",
-        url: network.config.url,
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          method: method,
-          params: params,
-          id: 1,
-        }),
-      };
-      const res = await request(options);
-      return JSON.parse(res.body).result;
-    }
+    const priorityFee = await callRpc(
+      network.config.url,
+      "eth_maxPriorityFeePerGas"
+    );
 
     console.log("Calling getBeneficiary method");
     const MinerOp = await ethers.getContractFactory("MinerOp");

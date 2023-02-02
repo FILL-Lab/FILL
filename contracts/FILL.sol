@@ -3,7 +3,6 @@ pragma solidity 0.8.17;
 
 import "@zondax/filecoin-solidity/contracts/v0.8/MinerAPI.sol";
 import "@zondax/filecoin-solidity/contracts/v0.8/types/MinerTypes.sol";
-import "@zondax/filecoin-solidity/contracts/v0.8/cbor/BytesCbor.sol";
 import "@zondax/filecoin-solidity/contracts/v0.8/cbor/BigIntCbor.sol";
 import "@zondax/filecoin-solidity/contracts/v0.8/SendAPI.sol";
 
@@ -170,9 +169,9 @@ interface FILLInterface {
 
 library OperateLib {
     function filterBorrows(
-        FILLInterface.BorrowInfo[] memory borrows,
+        FILLInterface.BorrowInfo[] storage borrows,
         address account
-    ) internal pure returns (FILLInterface.BorrowInfo[] memory) {
+    ) internal view returns (FILLInterface.BorrowInfo[] memory) {
         uint256 resultCount;
         for (uint256 i = 0; i < borrows.length; i++) {
             if (borrows[i].account == account) {
@@ -197,7 +196,13 @@ library OperateLib {
         bytes[] memory bindKeys,
         address account
     ) internal view returns (bytes[] memory) {
-        bytes[] memory ret = new bytes[](bindKeys.length);
+        uint256 resultCount;
+        for (uint256 i = 0; i < bindKeys.length; i++) {
+            if (minerBindsMap[bindKeys[i]] == account) {
+                resultCount++;
+            }
+        }
+        bytes[] memory ret = new bytes[](resultCount);
         uint256 j = 0;
         for (uint256 i = 0; i < bindKeys.length; i++) {
             if (minerBindsMap[bindKeys[i]] == account) {
@@ -210,10 +215,8 @@ library OperateLib {
 }
 
 contract FILL is Context, FILLInterface {
-    using BytesCBOR for bytes;
-
     mapping(bytes => address) private minerBindsMap;
-    bytes[] bindKeys;
+    bytes[] private bindKeys;
     mapping(bytes => MinerStackInfo) private minerStacks;
     BorrowInfo[] private borrows;
 
@@ -279,7 +282,7 @@ contract FILL is Context, FILLInterface {
     ) external returns (uint256) {
         haveStaking(minerAddr);
         isBindMiner(_msgSender(), minerAddr);
-        checkinterestRate(interest_rate, slippage);
+        checkInterestRate(interest_rate, slippage);
         require(
             (amount + minerStacks[minerAddr].borrowCount) <
                 minerStacks[minerAddr].quota,
@@ -344,13 +347,12 @@ contract FILL is Context, FILLInterface {
 
     function bindMiner(
         bytes memory minerAddr,
-        address blindAccount,
+        address bindAccount,
         string memory message,
         bytes memory signature
     ) external onlyOwner returns (bool) {
-        // todo : not ready
         if (minerBindsMap[minerAddr] == address(0)) {
-            minerBindsMap[minerAddr] = blindAccount;
+            minerBindsMap[minerAddr] = bindAccount;
             bindKeys.push(minerAddr);
         }
         return true;
@@ -384,6 +386,7 @@ contract FILL is Context, FILLInterface {
             .getBeneficiary(minerAddr);
 
         // todo : check new_beneficiary
+
         // new_quota check
         uint256 quota = uint256(
             bytes32(
@@ -473,6 +476,14 @@ contract FILL is Context, FILLInterface {
         return OperateLib.filterBorrows(borrows, account);
     }
 
+    function getStackMinerInfo(bytes memory minerAddr)
+        external
+        view
+        returns (MinerStackInfo memory)
+    {
+        return minerStacks[minerAddr];
+    }
+
     function allBorrows() external view returns (BorrowInfo[] memory) {
         return borrows;
     }
@@ -484,7 +495,8 @@ contract FILL is Context, FILLInterface {
                     _accumulatedInterestFIL -
                     (_accumulatedBorrowFIL - _accumulatedPaybackFIL)),
                 totalDeposited: _accumulatedDepositFIL,
-                utilizedLiquidity: 0,
+                utilizedLiquidity: (_accumulatedBorrowFIL -
+                    _accumulatedPaybackFIL),
                 accumulatedInterest: _accumulatedInterestFIL,
                 accumulatedPayback: _accumulatedPaybackFIL,
                 accumulatedRedeem: _accumulatedRedeemFIL,
@@ -603,14 +615,22 @@ contract FILL is Context, FILLInterface {
         private
         view
     {
-        // todo : add exchangeRate check here
+        // require(
+        //     (exchRate - slippage) <= _exchangeRate &&
+        //         _exchangeRate <= (exchRate + slippage),
+        //     "check exchange rate failed"
+        // );
     }
 
-    function checkinterestRate(uint256 interest_rate, uint256 slippage)
+    function checkInterestRate(uint256 interest_rate, uint256 slippage)
         private
         view
     {
-        // todo : add exchangeRate check here
+        // require(
+        //     (interest_rate - slippage) <= _interestRate &&
+        //         _interestRate <= (interest_rate + slippage),
+        //     "check interest rate failed"
+        // );
     }
 
     function isBindMiner(address account, bytes memory minerAddr) private view {
