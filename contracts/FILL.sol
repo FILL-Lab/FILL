@@ -110,6 +110,14 @@ interface FILLInterface {
         view
         returns (BorrowInfo[] memory infos);
 
+    /// @dev get stacking miner info : minerAddr,quota,borrowCount,paybackCount,expiration
+    /// @param minerAddr miner address
+    /// @return info return stacking miner info
+    function getStackMinerInfo(bytes memory minerAddr)
+        external
+        view
+        returns (MinerStackInfo memory);
+
     /// @dev FLE token address
     function fleAddress() external view returns (address);
 
@@ -516,6 +524,7 @@ contract FILL is Context, FILLInterface {
         return _exchangeRate;
     }
 
+    // todo : remove it later
     function setExchangeRate(uint64 newRate)
         public
         onlyOwner

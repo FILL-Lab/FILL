@@ -12,12 +12,12 @@ task("fill-fillInfo", "fillInfo")
     const accounts = await ethers.getSigners();
     const signer = accounts[0];
 
-    const FILLContractContract = new ethers.Contract(
+    const FILLContractInterface = new ethers.Contract(
       contractAddr,
       FILLContract.interface,
       signer
     );
-    const fillInfo = await FILLContractContract.fillInfo();
+    const fillInfo = await FILLContractInterface.fillInfo();
     console.log("fillInfo:", fillInfo);
   });
 module.exports = {};
