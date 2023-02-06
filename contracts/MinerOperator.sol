@@ -16,14 +16,14 @@ contract MinerOp {
 
     function testBeneficiary(bytes memory minerAddress) public {
         // get beneficiary
-        MinerTypes.GetBeneficiaryReturn memory beneficiaryRet = MinerAPI
-            .getBeneficiary(minerAddress);
+        CommonTypes.PendingBeneficiaryChange memory proposedBeneficiaryRet = MinerAPI
+            .getBeneficiary(minerAddress).proposed;
 
         MinerTypes.ChangeBeneficiaryParams memory changeParams = MinerTypes
             .ChangeBeneficiaryParams({
-                new_beneficiary: beneficiaryRet.proposed.new_beneficiary,
-                new_quota: beneficiaryRet.proposed.new_quota,
-                new_expiration: beneficiaryRet.proposed.new_expiration
+                new_beneficiary: proposedBeneficiaryRet.new_beneficiary,
+                new_quota: proposedBeneficiaryRet.new_quota,
+                new_expiration: proposedBeneficiaryRet.new_expiration
             });
         MinerAPI.changeBeneficiary(minerAddress, changeParams);
     }
