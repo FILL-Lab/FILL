@@ -201,7 +201,7 @@ library OperateLib {
 
     function filterUserMiners(
         mapping(bytes => address) storage minerBindsMap,
-        bytes[] memory bindKeys,
+        bytes[] storage bindKeys,
         address account
     ) internal view returns (bytes[] memory) {
         uint256 resultCount;
@@ -294,7 +294,7 @@ contract FILL is Context, FILLInterface {
         require(
             (amount + minerStacks[minerAddr].borrowCount) <
                 minerStacks[minerAddr].quota,
-            "not enough to borow"
+            "not enough to borrow"
         );
         // add a borrow
         borrows.push(
@@ -390,20 +390,20 @@ contract FILL is Context, FILLInterface {
         noStacking(minerAddr);
         isBindMiner(_msgSender(), minerAddr);
         // get propose for change beneficiary
-        MinerTypes.GetBeneficiaryReturn memory beneficiaryRet = MinerAPI
-            .getBeneficiary(minerAddr);
+        CommonTypes.PendingBeneficiaryChange memory proposedBeneficiaryRet = MinerAPI
+            .getBeneficiary(minerAddr).proposed;
 
         // todo : check new_beneficiary
 
         // new_quota check
         uint256 quota = uint256(
             bytes32(
-                BigIntCBOR.serializeBigNum(beneficiaryRet.proposed.new_quota)
+                BigIntCBOR.serializeBigNum(proposedBeneficiaryRet.new_quota)
             )
         );
         require(quota > 0, "need quota > 0");
         require(
-            beneficiaryRet.proposed.new_expiration > block.number,
+            proposedBeneficiaryRet.new_expiration > block.number,
             "expiration invalid"
         );
 
@@ -411,9 +411,9 @@ contract FILL is Context, FILLInterface {
         MinerAPI.changeBeneficiary(
             minerAddr,
             MinerTypes.ChangeBeneficiaryParams({
-                new_beneficiary: beneficiaryRet.proposed.new_beneficiary,
-                new_quota: beneficiaryRet.proposed.new_quota,
-                new_expiration: beneficiaryRet.proposed.new_expiration
+                new_beneficiary: proposedBeneficiaryRet.new_beneficiary,
+                new_quota: proposedBeneficiaryRet.new_quota,
+                new_expiration: proposedBeneficiaryRet.new_expiration
             })
         );
 
@@ -425,14 +425,14 @@ contract FILL is Context, FILLInterface {
             quota: quota,
             borrowCount: 0,
             paybackCount: 0,
-            expiration: beneficiaryRet.proposed.new_expiration
+            expiration: proposedBeneficiaryRet.new_expiration
         });
 
         emit StackingMiner(
             minerAddr,
-            beneficiaryRet.proposed.new_beneficiary,
+            proposedBeneficiaryRet.new_beneficiary,
             quota,
-            beneficiaryRet.proposed.new_expiration
+            proposedBeneficiaryRet.new_expiration
         );
         return true;
     }
@@ -443,23 +443,23 @@ contract FILL is Context, FILLInterface {
         require(
             minerStacks[minerAddr].borrowCount ==
                 minerStacks[minerAddr].paybackCount,
-            "payback first "
+            "payback first"
         );
 
         // change Beneficiary to owner
-        MinerTypes.GetOwnerReturn memory minerInfo = MinerAPI.getOwner(
+        bytes memory owner = MinerAPI.getOwner(
             minerAddr
-        );
-        MinerTypes.GetBeneficiaryReturn memory beneficiaryRet = MinerAPI
-            .getBeneficiary(minerAddr);
+        ).owner;
+        bytes memory beneficiary = MinerAPI
+            .getBeneficiary(minerAddr).active.beneficiary;
         if (
-            uint256(bytes32(beneficiaryRet.active.beneficiary)) !=
-            uint256(bytes32(minerInfo.owner))
+            uint256(bytes32(beneficiary)) !=
+            uint256(bytes32(owner))
         ) {
             MinerAPI.changeBeneficiary(
                 minerAddr,
                 MinerTypes.ChangeBeneficiaryParams({
-                    new_beneficiary: minerInfo.owner,
+                    new_beneficiary: owner,
                     new_quota: BigInt(hex"00", false),
                     new_expiration: 0
                 })
@@ -467,7 +467,7 @@ contract FILL is Context, FILLInterface {
         }
 
         delete minerStacks[minerAddr];
-        emit UnstackingMiner(minerAddr, minerInfo.owner, 0, 0);
+        emit UnstackingMiner(minerAddr, owner, 0, 0);
 
         return true;
     }
