@@ -7,6 +7,7 @@ import "@zondax/filecoin-solidity/contracts/v0.8/cbor/BigIntCbor.sol";
 import "@zondax/filecoin-solidity/contracts/v0.8/SendAPI.sol";
 
 import "./Utils/Context.sol";
+import "./Utils/Validation.sol";
 import "./FLE.sol";
 
 interface FILLInterface {
@@ -120,6 +121,9 @@ interface FILLInterface {
 
     /// @dev FLE token address
     function fleAddress() external view returns (address);
+
+    /// @dev Validation contract address
+    function validationAddress() external view returns (address);
 
     /// @dev return FIL/FLE exchange rate: total amount of FIL liquidity divided by total amount of FLE outstanding
     function exchangeRate() external view returns (uint256);
@@ -242,9 +246,11 @@ contract FILL is Context, FILLInterface {
     uint256 private _interestRate; // interestRate=_interestRate/DEFAULT_RATE_BASE
     uint256 private _utilizationRate; //
     FLE _tokenFLE;
+    Validation _validation;
 
-    constructor(address fleAddr) {
+    constructor(address fleAddr, address validationAddr) {
         _tokenFLE = FLE(fleAddr);
+        _validation = Validation(validationAddr);
         _owner = _msgSender();
         _feeRate = 1000;
         _exchangeRate = DEFAULT_RATE_BASE;
@@ -355,15 +361,19 @@ contract FILL is Context, FILLInterface {
 
     function bindMiner(
         bytes memory minerAddr,
-        address bindAccount,
-        string memory message,
-        bytes memory signature
-    ) external onlyOwner returns (bool) {
+        bytes memory owner,
+        bytes memory signature,
+        uint256 deadline
+    ) external returns (bool) {
         if (minerBindsMap[minerAddr] == address(0)) {
-            minerBindsMap[minerAddr] = bindAccount;
+            address sender = _msgSender();
+            _validation.validateOwner(owner, signature, minerAddr, sender, deadline);
+            minerBindsMap[minerAddr] = sender;
             bindKeys.push(minerAddr);
+            return true;
+        } else {
+            return false;
         }
-        return true;
     }
 
     function ubindMiner(bytes memory minerAddr) external returns (bool) {
@@ -518,6 +528,10 @@ contract FILL is Context, FILLInterface {
 
     function fleAddress() external view returns (address) {
         return address(_tokenFLE);
+    }
+
+    function validationAddress() external view returns (address) {
+        return address(_validation);
     }
 
     function exchangeRate() external view returns (uint256) {
