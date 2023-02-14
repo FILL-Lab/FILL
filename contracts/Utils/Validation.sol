@@ -18,7 +18,6 @@ contract Validation {
         bytes memory currentOwner = getOwner(minerAddr);
         require(keccak256(abi.encode(owner)) == keccak256(abi.encode(currentOwner)), "not the owner");
         require(block.timestamp < deadline, "signed transaction expired");
-        require(sender == msg.sender, "wrong sender");
         bytes memory digest = getDigest(
             owner,
             minerAddr,
