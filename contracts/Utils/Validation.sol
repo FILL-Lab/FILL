@@ -45,7 +45,7 @@ contract Validation {
         address sender,
         uint256 deadline
     ) public view returns (bytes memory) {
-        bytes32 proto = keccak256(abi.encode(
+        bytes32 digest = keccak256(abi.encode(
             keccak256("validateOwner"),
             owner,
             minerAddr,
@@ -54,11 +54,7 @@ contract Validation {
             getChainId(),
             deadline
         ));
-        bytes memory digest = new bytes(proto.length);
-        for (uint i = 0; i< proto.length; i++){
-            digest[i] = proto[i];
-        }
-        return digest;
+        return bytes.concat(digest);
     }
 
     function getChainId() private view returns (uint256 chainId) {
