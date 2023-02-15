@@ -361,13 +361,11 @@ contract FILL is Context, FILLInterface {
 
     function bindMiner(
         bytes memory minerAddr,
-        bytes memory owner,
-        bytes memory signature,
-        uint256 deadline
+        bytes memory signature
     ) external returns (bool) {
         if (minerBindsMap[minerAddr] == address(0)) {
             address sender = _msgSender();
-            _validation.validateOwner(owner, signature, minerAddr, sender, deadline);
+            _validation.validateOwner(minerAddr, signature, sender);
             minerBindsMap[minerAddr] = sender;
             bindKeys.push(minerAddr);
             return true;

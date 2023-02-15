@@ -5,56 +5,56 @@ pragma solidity 0.8.17;
 import "@zondax/filecoin-solidity/contracts/v0.8/MinerAPI.sol";
 import "@zondax/filecoin-solidity/contracts/v0.8/AccountAPI.sol";
 
-contract Validation {
+import "./Context.sol";
+
+contract Validation is Context {
     mapping(bytes => uint256) private nonces;
 
     function validateOwner(
-        bytes memory owner,
-        bytes memory signature,
         bytes memory minerAddr,
-        address sender,
-        uint256 deadline
+        bytes memory signature,
+        address sender
     ) external {
-        bytes memory currentOwner = getOwner(minerAddr);
-        require(keccak256(abi.encode(owner)) == keccak256(abi.encode(currentOwner)), "not the owner");
-        require(block.timestamp < deadline, "signed transaction expired");
+        bytes memory ownerAddr = getOwner(minerAddr);
         bytes memory digest = getDigest(
-            owner,
+            ownerAddr,
             minerAddr,
-            sender,
-            deadline
+            sender
         );
         AccountAPI.authenticateMessage(
-            owner,
+            ownerAddr,
             AccountTypes.AuthenticateMessageParams({
                 signature: signature,
                 message: digest
             })
         );
         
-        nonces[owner] += 1;
+        nonces[ownerAddr] += 1;
     }
 
-    function getOwner(bytes memory minerAddr) public returns (bytes memory) {
-        return MinerAPI.getOwner(minerAddr).owner;
+    function getSigningMsg(bytes memory minerAddr) external returns (bytes memory) {
+        bytes memory ownerAddr = getOwner(minerAddr);
+        return getDigest(ownerAddr, minerAddr, _msgSender());
     }
 
     function getDigest(
-        bytes memory owner,
+        bytes memory ownerAddr,
         bytes memory minerAddr,
-        address sender,
-        uint256 deadline
-    ) public view returns (bytes memory) {
+        address sender
+    ) private view returns (bytes memory) {
         bytes32 digest = keccak256(abi.encode(
             keccak256("validateOwner"),
-            owner,
+            ownerAddr,
             minerAddr,
             sender,
-            nonces[owner],
-            getChainId(),
-            deadline
+            nonces[ownerAddr],
+            getChainId()
         ));
         return bytes.concat(digest);
+    }
+
+    function getOwner(bytes memory minerAddr) private returns (bytes memory) {
+        return MinerAPI.getOwner(minerAddr).owner;
     }
 
     function getChainId() private view returns (uint256 chainId) {
