@@ -374,7 +374,7 @@ contract FILL is Context, FILLInterface {
         }
     }
 
-    function ubindMiner(bytes memory minerAddr) external returns (bool) {
+    function unbindMiner(bytes memory minerAddr) external returns (bool) {
         isBindMiner(_msgSender(), minerAddr);
         delete minerBindsMap[minerAddr];
         for (uint256 i = 0; i < bindKeys.length; i++) {
