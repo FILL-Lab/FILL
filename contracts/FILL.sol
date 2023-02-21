@@ -406,7 +406,7 @@ contract FILL is Context, FILLInterface {
         // new_quota check
         uint256 quota = uint256(
             bytes32(
-                BigIntCBOR.serializeBigNum(proposedBeneficiaryRet.new_quota)
+                BigIntCBOR.serializeBigInt(proposedBeneficiaryRet.new_quota)
             )
         );
         require(quota > 0, "need quota > 0");
