@@ -21,7 +21,11 @@ interface FILLInterface {
         uint256 paybackTime; // payback time
         bool isPayback; // flag for status
     }
-    struct MinerStackInfo {
+    struct MinerBorrowInfo {
+        bytes minerAddr; //miner
+        BorrowInfo[] borrows;
+    }
+    struct MinerStakingInfo {
         bytes minerAddr;
         uint256 quota;
         uint256 borrowCount;
@@ -85,15 +89,15 @@ interface FILLInterface {
         external
         returns (uint256 amount);
 
-    /// @dev stacking miner : change beneficiary to contract , need owner for miner propose change beneficiary first
+    /// @dev staking miner : change beneficiary to contract , need owner for miner propose change beneficiary first
     /// @param minerAddr miner address
     /// @return flag result flag for change beneficiary
-    function stackingMiner(bytes memory minerAddr) external returns (bool);
+    function stakingMiner(bytes memory minerAddr) external returns (bool);
 
-    /// @dev unstacking miner : change beneficiary back to miner owner, need payback all first
+    /// @dev unstaking miner : change beneficiary back to miner owner, need payback all first
     /// @param minerAddr miner address
     /// @return flag result flag for change beneficiary
-    function unstackingMiner(bytes memory minerAddr) external returns (bool);
+    function unstakingMiner(bytes memory minerAddr) external returns (bool);
 
     /// @dev FLE balance of a user
     /// @param account user account
@@ -109,15 +113,15 @@ interface FILLInterface {
     function userBorrows(address account)
         external
         view
-        returns (BorrowInfo[] memory infos);
+        returns (MinerBorrowInfo[] memory infos);
 
-    /// @dev get stacking miner info : minerAddr,quota,borrowCount,paybackCount,expiration
+    /// @dev get staking miner info : minerAddr,quota,borrowCount,paybackCount,expiration
     /// @param minerAddr miner address
-    /// @return info return stacking miner info
-    function getStackMinerInfo(bytes memory minerAddr)
+    /// @return info return staking miner info
+    function getStakingMinerInfo(bytes memory minerAddr)
         external
         view
-        returns (MinerStackInfo memory);
+        returns (MinerStakingInfo memory);
 
     /// @dev FLE token address
     function fleAddress() external view returns (address);
@@ -163,74 +167,27 @@ interface FILLInterface {
         uint256 amountFIL
     );
 
-    // / @dev Emitted when stacking `minerAddr` : change beneficiary to `beneficiary` with info `quota`,`expiration`
-    event StackingMiner(
+    // / @dev Emitted when staking `minerAddr` : change beneficiary to `beneficiary` with info `quota`,`expiration`
+    event StakingMiner(
         bytes minerAddr,
         bytes beneficiary,
         uint256 quota,
         uint64 expiration
     );
-    // / @dev Emitted when unstacking `minerAddr` : change beneficiary to `beneficiary` with info `quota`,`expiration`
-    event UnstackingMiner(
+    // / @dev Emitted when unstaking `minerAddr` : change beneficiary to `beneficiary` with info `quota`,`expiration`
+    event UnstakingMiner(
         bytes minerAddr,
         bytes beneficiary,
         uint256 quota,
         uint64 expiration
     );
-}
-
-library OperateLib {
-    function filterBorrows(
-        FILLInterface.BorrowInfo[] storage borrows,
-        address account
-    ) internal view returns (FILLInterface.BorrowInfo[] memory) {
-        uint256 resultCount;
-        for (uint256 i = 0; i < borrows.length; i++) {
-            if (borrows[i].account == account) {
-                resultCount++;
-            }
-        }
-        FILLInterface.BorrowInfo[] memory ret = new FILLInterface.BorrowInfo[](
-            resultCount
-        );
-        uint256 j = 0;
-        for (uint256 i = 0; i < resultCount; i++) {
-            if (borrows[i].account == account) {
-                ret[j] = borrows[i];
-                j++;
-            }
-        }
-        return ret;
-    }
-
-    function filterUserMiners(
-        mapping(bytes => address) storage minerBindsMap,
-        bytes[] storage bindKeys,
-        address account
-    ) internal view returns (bytes[] memory) {
-        uint256 resultCount;
-        for (uint256 i = 0; i < bindKeys.length; i++) {
-            if (minerBindsMap[bindKeys[i]] == account) {
-                resultCount++;
-            }
-        }
-        bytes[] memory ret = new bytes[](resultCount);
-        uint256 j = 0;
-        for (uint256 i = 0; i < bindKeys.length; i++) {
-            if (minerBindsMap[bindKeys[i]] == account) {
-                ret[j] = bindKeys[i];
-                j++;
-            }
-        }
-        return ret;
-    }
 }
 
 contract FILL is Context, FILLInterface {
+    mapping(address => bytes[]) public userMiners;
+    mapping(bytes => BorrowInfo[]) public minerBorrows;
     mapping(bytes => address) private minerBindsMap;
-    bytes[] private bindKeys;
-    mapping(bytes => MinerStackInfo) private minerStacks;
-    BorrowInfo[] private borrows;
+    mapping(bytes => MinerStakingInfo) private minerStaking;
 
     address private _owner;
     uint256 private _accumulatedDepositFIL;
@@ -298,11 +255,12 @@ contract FILL is Context, FILLInterface {
         isBindMiner(_msgSender(), minerAddr);
         checkInterestRate(interest_rate, slippage);
         require(
-            (amount + minerStacks[minerAddr].borrowCount) <
-                minerStacks[minerAddr].quota,
+            (amount + minerStaking[minerAddr].borrowCount) <
+                minerStaking[minerAddr].quota,
             "not enough to borrow"
         );
         // add a borrow
+        BorrowInfo[] storage borrows = minerBorrows[minerAddr];
         borrows.push(
             BorrowInfo({
                 id: borrows.length,
@@ -315,7 +273,7 @@ contract FILL is Context, FILLInterface {
                 isPayback: false
             })
         );
-        minerStacks[minerAddr].borrowCount += amount;
+        minerStaking[minerAddr].borrowCount += amount;
         _accumulatedBorrowFIL += amount;
         // send fil to miner
         SendAPI.send(minerAddr, amount);
@@ -324,37 +282,39 @@ contract FILL is Context, FILLInterface {
         return amount;
     }
 
-    function payback(bytes memory minerAddress, uint256 borrowId)
+    function payback(bytes memory minerAddr, uint256 borrowId)
         external
         returns (uint256)
     {
+        require(minerAddr.length != 0, "invalid miner address");
+        BorrowInfo storage info = minerBorrows[minerAddr][borrowId];
         require(
-            uint256(bytes32(borrows[borrowId].minerAddr)) ==
-                uint256(bytes32(minerAddress)),
-            "addr not match"
+            uint256(bytes32(info.minerAddr)) == uint256(bytes32(minerAddr)),
+            "invalid borrowId"
         );
-        require(borrows[borrowId].isPayback == false, "no need payback");
+        require(info.isPayback == false, "no need payback");
         // calc interest
         uint256 borrowingPeriod = 0; // todo : 0 only for dev
-        uint256 interest = (borrows[borrowId].amount * borrowingPeriod) /
+        uint256 interest = (info.amount * borrowingPeriod) /
             _interestRate;
-        uint256 paybackAmount = borrows[borrowId].amount + interest;
+        uint256 paybackAmount = info.amount + interest;
 
         // pay back use miner withdraw
         MinerAPI.withdrawBalance(
-            minerAddress,
+            minerAddr,
             MinerTypes.WithdrawBalanceParams({
                 amount_requested: abi.encodePacked(bytes32(paybackAmount))
             })
         );
-        _accumulatedPaybackFIL += borrows[borrowId].amount;
+        _accumulatedPaybackFIL += info.amount;
         _accumulatedInterestFIL += interest;
-        borrows[borrowId].paybackTime = block.timestamp;
-        borrows[borrowId].isPayback = true;
 
-        minerStacks[minerAddress].paybackCount += borrows[borrowId].amount;
+        minerStaking[minerAddr].paybackCount += info.amount;
 
-        emit Payback(borrowId, _msgSender(), minerAddress, paybackAmount);
+        info.paybackTime = block.timestamp;
+        info.isPayback = true;
+
+        emit Payback(borrowId, _msgSender(), minerAddr, paybackAmount);
 
         return paybackAmount;
     }
@@ -367,7 +327,7 @@ contract FILL is Context, FILLInterface {
             address sender = _msgSender();
             _validation.validateOwner(minerAddr, signature, sender);
             minerBindsMap[minerAddr] = sender;
-            bindKeys.push(minerAddr);
+            userMiners[sender].push(minerAddr);
             return true;
         } else {
             return false;
@@ -375,27 +335,21 @@ contract FILL is Context, FILLInterface {
     }
 
     function unbindMiner(bytes memory minerAddr) external returns (bool) {
-        isBindMiner(_msgSender(), minerAddr);
+        address sender = _msgSender();
+        isBindMiner(sender, minerAddr);
         delete minerBindsMap[minerAddr];
-        for (uint256 i = 0; i < bindKeys.length; i++) {
-            if (uint256(bytes32(bindKeys[i])) == uint256(bytes32(minerAddr))) {
-                delete bindKeys[i];
+        bytes[] storage miners = userMiners[sender];
+        for (uint256 i = 0; i < miners.length; i++) {
+            if (uint256(bytes32(miners[i])) == uint256(bytes32(minerAddr))) {
+                delete miners[i];
                 break;
             }
         }
         return true;
     }
 
-    function userMiners(address account)
-        external
-        view
-        returns (bytes[] memory)
-    {
-        return OperateLib.filterUserMiners(minerBindsMap, bindKeys, account);
-    }
-
-    function stackingMiner(bytes memory minerAddr) external returns (bool) {
-        noStacking(minerAddr);
+    function stakingMiner(bytes memory minerAddr) external returns (bool) {
+        noStaking(minerAddr);
         isBindMiner(_msgSender(), minerAddr);
         // get propose for change beneficiary
         CommonTypes.PendingBeneficiaryChange memory proposedBeneficiaryRet = MinerAPI
@@ -427,8 +381,8 @@ contract FILL is Context, FILLInterface {
 
         //  todo : check beneficiary again ?
 
-        // add minerStacks
-        minerStacks[minerAddr] = MinerStackInfo({
+        // add minerStaking
+        minerStaking[minerAddr] = MinerStakingInfo({
             minerAddr: minerAddr,
             quota: quota,
             borrowCount: 0,
@@ -436,7 +390,7 @@ contract FILL is Context, FILLInterface {
             expiration: proposedBeneficiaryRet.new_expiration
         });
 
-        emit StackingMiner(
+        emit StakingMiner(
             minerAddr,
             proposedBeneficiaryRet.new_beneficiary,
             quota,
@@ -445,12 +399,12 @@ contract FILL is Context, FILLInterface {
         return true;
     }
 
-    function unstackingMiner(bytes memory minerAddr) external returns (bool) {
+    function unstakingMiner(bytes memory minerAddr) external returns (bool) {
         haveStaking(minerAddr);
         isBindMiner(_msgSender(), minerAddr);
         require(
-            minerStacks[minerAddr].borrowCount ==
-                minerStacks[minerAddr].paybackCount,
+            minerStaking[minerAddr].borrowCount ==
+                minerStaking[minerAddr].paybackCount,
             "payback first"
         );
 
@@ -474,8 +428,8 @@ contract FILL is Context, FILLInterface {
             );
         }
 
-        delete minerStacks[minerAddr];
-        emit UnstackingMiner(minerAddr, owner, 0, 0);
+        delete minerStaking[minerAddr];
+        emit UnstakingMiner(minerAddr, owner, 0, 0);
 
         return true;
     }
@@ -487,21 +441,22 @@ contract FILL is Context, FILLInterface {
     function userBorrows(address account)
         external
         view
-        returns (BorrowInfo[] memory)
+        returns (MinerBorrowInfo[] memory) 
     {
-        return OperateLib.filterBorrows(borrows, account);
+        MinerBorrowInfo[] memory result = new MinerBorrowInfo[](userMiners[account].length);
+        for (uint256 i = 0; i < result.length; i++) {
+            result[i].minerAddr = userMiners[account][i];
+            result[i].borrows = minerBorrows[userMiners[account][i]];
+        }
+        return result;
     }
 
-    function getStackMinerInfo(bytes memory minerAddr)
+    function getStakingMinerInfo(bytes memory minerAddr)
         external
         view
-        returns (MinerStackInfo memory)
+        returns (MinerStakingInfo memory)
     {
-        return minerStacks[minerAddr];
-    }
-
-    function allBorrows() external view returns (BorrowInfo[] memory) {
-        return borrows;
+        return minerStaking[minerAddr];
     }
 
     function fillInfo() external view returns (FILLInfo memory) {
@@ -624,12 +579,12 @@ contract FILL is Context, FILLInterface {
         _;
     }
 
-    function noStacking(bytes memory _addr) private view {
-        require(minerStacks[_addr].quota == 0, "unstaking first");
+    function noStaking(bytes memory _addr) private view {
+        require(minerStaking[_addr].quota == 0, "unstaking first");
     }
 
     function haveStaking(bytes memory _addr) private view {
-        require(minerStacks[_addr].quota > 0, "staking first");
+        require(minerStaking[_addr].quota > 0, "staking first");
     }
 
     function checkExchangeRate(uint256 exchRate, uint256 slippage)

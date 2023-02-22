@@ -12,11 +12,15 @@
         uint256 amount; //borrow amount
         bytes minerAddr; //miner
         uint256 interestRate; // interest rate
-        uint256 borrowTime;
-        uint256 paybackTime;
-        bool isPayback;
+        uint256 borrowTime; // borrow time
+        uint256 paybackTime; // payback time
+        bool isPayback; // flag for status
     }
-    struct MinerStackInfo {
+    struct MinerBorrowInfo {
+        bytes minerAddr; //miner
+        BorrowInfo[] borrows;
+    }
+    struct MinerStakingInfo {
         bytes minerAddr;
         uint256 quota;
         uint256 borrowCount;
@@ -80,15 +84,15 @@
         external
         returns (uint256 amount);
 
-    /// @dev stacking miner : change beneficiary to contract , need owner for miner propose change beneficiary first
+    /// @dev staking miner : change beneficiary to contract , need owner for miner propose change beneficiary first
     /// @param minerAddr miner address
     /// @return flag result flag for change beneficiary
-    function stackingMiner(bytes memory minerAddr) external returns (bool);
+    function stakingMiner(bytes memory minerAddr) external returns (bool);
 
-    /// @dev unstacking miner : change beneficiary back to miner owner, need payback all first
+    /// @dev unstaking miner : change beneficiary back to miner owner, need payback all first
     /// @param minerAddr miner address
     /// @return flag result flag for change beneficiary
-    function unstackingMiner(bytes memory minerAddr) external returns (bool);
+    function unstakingMiner(bytes memory minerAddr) external returns (bool);
 
     /// @dev FLE balance of a user
     /// @param account user account
@@ -104,10 +108,21 @@
     function userBorrows(address account)
         external
         view
-        returns (BorrowInfo[] memory infos);
+        returns (MinerBorrowInfo[] memory infos);
+
+    /// @dev get staking miner info : minerAddr,quota,borrowCount,paybackCount,expiration
+    /// @param minerAddr miner address
+    /// @return info return staking miner info
+    function getStakingMinerInfo(bytes memory minerAddr)
+        external
+        view
+        returns (MinerStakingInfo memory);
 
     /// @dev FLE token address
     function fleAddress() external view returns (address);
+
+    /// @dev Validation contract address
+    function validationAddress() external view returns (address);
 
     /// @dev return FIL/FLE exchange rate: total amount of FIL liquidity divided by total amount of FLE outstanding
     function exchangeRate() external view returns (uint256);
@@ -147,15 +162,15 @@
         uint256 amountFIL
     );
 
-    // / @dev Emitted when stacking `minerAddr` : change beneficiary to `beneficiary` with info `quota`,`expiration`
-    event StackingMiner(
+    // / @dev Emitted when staking `minerAddr` : change beneficiary to `beneficiary` with info `quota`,`expiration`
+    event StakingMiner(
         bytes minerAddr,
         bytes beneficiary,
         uint256 quota,
         uint64 expiration
     );
-    // / @dev Emitted when unstacking `minerAddr` : change beneficiary to `beneficiary` with info `quota`,`expiration`
-    event UnstackingMiner(
+    // / @dev Emitted when unstaking `minerAddr` : change beneficiary to `beneficiary` with info `quota`,`expiration`
+    event UnstakingMiner(
         bytes minerAddr,
         bytes beneficiary,
         uint256 quota,
