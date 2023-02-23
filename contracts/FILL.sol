@@ -286,10 +286,11 @@ contract FILL is Context, FILLInterface {
         external
         returns (uint256)
     {
-        require(minerAddr.length != 0, "invalid miner address");
+        uint256 addr = uint256(bytes32(minerAddr));
+        require(addr != 0, "invalid miner address");
         BorrowInfo storage info = minerBorrows[minerAddr][borrowId];
         require(
-            uint256(bytes32(info.minerAddr)) == uint256(bytes32(minerAddr)),
+            uint256(bytes32(info.minerAddr)) == addr,
             "invalid borrowId"
         );
         require(info.isPayback == false, "no need payback");
