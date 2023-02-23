@@ -185,7 +185,7 @@ interface FILLInterface {
 
 contract FILL is Context, FILLInterface {
     mapping(bytes => BorrowInfo[]) public minerBorrows;
-    mapping(address => bytes[]) public userMiners;
+    mapping(address => bytes[]) private userMinerPairs;
     mapping(bytes => address) private minerBindsMap;
     mapping(bytes => MinerStakingInfo) private minerStaking;
 
@@ -327,7 +327,7 @@ contract FILL is Context, FILLInterface {
             address sender = _msgSender();
             _validation.validateOwner(minerAddr, signature, sender);
             minerBindsMap[minerAddr] = sender;
-            userMiners[sender].push(minerAddr);
+            userMinerPairs[sender].push(minerAddr);
             return true;
         } else {
             return false;
@@ -338,7 +338,7 @@ contract FILL is Context, FILLInterface {
         address sender = _msgSender();
         isBindMiner(sender, minerAddr);
         delete minerBindsMap[minerAddr];
-        bytes[] storage miners = userMiners[sender];
+        bytes[] storage miners = userMinerPairs[sender];
         for (uint256 i = 0; i < miners.length; i++) {
             if (uint256(bytes32(miners[i])) == uint256(bytes32(minerAddr))) {
                 if (i != miners.length - 1) {
@@ -446,9 +446,9 @@ contract FILL is Context, FILLInterface {
         view
         returns (MinerBorrowInfo[] memory) 
     {
-        MinerBorrowInfo[] memory result = new MinerBorrowInfo[](userMiners[account].length);
+        MinerBorrowInfo[] memory result = new MinerBorrowInfo[](userMinerPairs[account].length);
         for (uint256 i = 0; i < result.length; i++) {
-            bytes storage minerAddr = userMiners[account][i];
+            bytes storage minerAddr = userMinerPairs[account][i];
             result[i].minerAddr = minerAddr;
             result[i].borrows = minerBorrows[minerAddr];
         }
@@ -529,6 +529,11 @@ contract FILL is Context, FILLInterface {
     {
         _interestRate = newRate;
         return _interestRate;
+    }
+
+    function userMiners(address account) external view returns (bytes[] memory) {
+        bytes[] memory result = userMinerPairs[account];
+        return result;
     }
 
     // ------------------ function only for dev ------------------begin
