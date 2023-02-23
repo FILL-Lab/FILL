@@ -184,8 +184,8 @@ interface FILLInterface {
 }
 
 contract FILL is Context, FILLInterface {
-    mapping(address => bytes[]) public userMiners;
     mapping(bytes => BorrowInfo[]) public minerBorrows;
+    mapping(address => bytes[]) public userMiners;
     mapping(bytes => address) private minerBindsMap;
     mapping(bytes => MinerStakingInfo) private minerStaking;
 
@@ -341,7 +341,10 @@ contract FILL is Context, FILLInterface {
         bytes[] storage miners = userMiners[sender];
         for (uint256 i = 0; i < miners.length; i++) {
             if (uint256(bytes32(miners[i])) == uint256(bytes32(minerAddr))) {
-                delete miners[i];
+                if (i != miners.length - 1) {
+                    miners[i] = miners[miners.length - 1];
+                }
+                miners.pop();
                 break;
             }
         }
@@ -445,8 +448,9 @@ contract FILL is Context, FILLInterface {
     {
         MinerBorrowInfo[] memory result = new MinerBorrowInfo[](userMiners[account].length);
         for (uint256 i = 0; i < result.length; i++) {
-            result[i].minerAddr = userMiners[account][i];
-            result[i].borrows = minerBorrows[userMiners[account][i]];
+            bytes storage minerAddr = userMiners[account][i];
+            result[i].minerAddr = minerAddr;
+            result[i].borrows = minerBorrows[minerAddr];
         }
         return result;
     }
@@ -610,6 +614,7 @@ contract FILL is Context, FILLInterface {
     }
 
     function isBindMiner(address account, bytes memory minerAddr) private view {
+        require(account != address(0), "invalid account");
         require(minerBindsMap[minerAddr] == account, "not bind");
     }
 }
