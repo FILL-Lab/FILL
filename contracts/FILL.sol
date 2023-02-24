@@ -184,6 +184,7 @@ interface FILLInterface {
 }
 
 contract FILL is Context, FILLInterface {
+    bytes[] public allMiners;
     mapping(bytes => BorrowInfo[]) public minerBorrows;
     mapping(address => bytes[]) private userMinerPairs;
     mapping(bytes => address) private minerBindsMap;
@@ -329,6 +330,7 @@ contract FILL is Context, FILLInterface {
             _validation.validateOwner(minerAddr, signature, sender);
             minerBindsMap[minerAddr] = sender;
             userMinerPairs[sender].push(minerAddr);
+            allMiners.push(minerAddr);
             return true;
         } else {
             return false;
@@ -340,12 +342,22 @@ contract FILL is Context, FILLInterface {
         isBindMiner(sender, minerAddr);
         delete minerBindsMap[minerAddr];
         bytes[] storage miners = userMinerPairs[sender];
+        uint256 addr = uint256(bytes32(minerAddr));
         for (uint256 i = 0; i < miners.length; i++) {
-            if (uint256(bytes32(miners[i])) == uint256(bytes32(minerAddr))) {
+            if (uint256(bytes32(miners[i])) == addr) {
                 if (i != miners.length - 1) {
                     miners[i] = miners[miners.length - 1];
                 }
                 miners.pop();
+                break;
+            }
+        }
+        for (uint256 i = 0; i < allMiners.length; i++) {
+            if (uint256(bytes32(allMiners[i])) == addr) {
+                if (i != allMiners.length - 1) {
+                    allMiners[i] = allMiners[allMiners.length - 1];
+                }
+                allMiners.pop();
                 break;
             }
         }
