@@ -11,18 +11,18 @@ contract Validation is Context {
     mapping(bytes => uint256) private nonces;
 
     function validateOwner(
-        bytes memory minerAddr,
+        uint64 minerID,
         bytes memory signature,
         address sender
     ) external {
-        bytes memory ownerAddr = getOwner(minerAddr);
+        bytes memory ownerAddr = getOwner(minerID);
         bytes memory digest = getDigest(
             ownerAddr,
-            minerAddr,
+            minerID,
             sender
         );
         AccountAPI.authenticateMessage(
-            ownerAddr,
+            CommonTypes.FilActorId.wrap(minerID),
             AccountTypes.AuthenticateMessageParams({
                 signature: signature,
                 message: digest
@@ -32,20 +32,20 @@ contract Validation is Context {
         nonces[ownerAddr] += 1;
     }
 
-    function getSigningMsg(bytes memory minerAddr) external returns (bytes memory) {
-        bytes memory ownerAddr = getOwner(minerAddr);
-        return getDigest(ownerAddr, minerAddr, _msgSender());
+    function getSigningMsg(uint64 minerID) external returns (bytes memory) {
+        bytes memory ownerAddr = getOwner(minerID);
+        return getDigest(ownerAddr, minerID, _msgSender());
     }
 
     function getDigest(
         bytes memory ownerAddr,
-        bytes memory minerAddr,
+        uint64 minerID,
         address sender
     ) private view returns (bytes memory) {
         bytes32 digest = keccak256(abi.encode(
             keccak256("validateOwner"),
             ownerAddr,
-            minerAddr,
+            minerID,
             sender,
             nonces[ownerAddr],
             getChainId()
@@ -53,8 +53,8 @@ contract Validation is Context {
         return bytes.concat(digest);
     }
 
-    function getOwner(bytes memory minerAddr) private returns (bytes memory) {
-        return MinerAPI.getOwner(minerAddr).owner;
+    function getOwner(uint64 minerID) private returns (bytes memory) {
+        return MinerAPI.getOwner(CommonTypes.FilActorId.wrap(minerID)).owner.data;
     }
 
     function getChainId() private view returns (uint256 chainId) {
