@@ -10,18 +10,18 @@
         uint256 id; // borrow id
         address account; //borrow account
         uint256 amount; //borrow amount
-        bytes minerAddr; //miner
+        uint64 minerId; //miner
         uint256 interestRate; // interest rate
         uint256 borrowTime; // borrow time
         uint256 paybackTime; // payback time
         bool isPayback; // flag for status
     }
     struct MinerBorrowInfo {
-        bytes minerAddr; //miner
+        uint64 minerId;
         BorrowInfo[] borrows;
     }
     struct MinerStakingInfo {
-        bytes minerAddr;
+        uint64 minerId;
         uint256 quota;
         uint256 borrowCount;
         uint256 paybackCount;
@@ -38,7 +38,9 @@
         uint256 utilizationRate; // h.	Current Utilization Rate  h=c/(b+d-e)
         uint256 exchangeRate; // i.	Current FLE/FIL Exchange Rate
         uint256 interestRate; // j.	Current Interest Rate
-        uint256 totalFee; // k.	Total Transaction Fee Received
+        uint256 collateralizationRate; // k. Current Collateralization Rate
+        uint256 totalFee; // l.	Total Transaction Fee Received
+        uint256 leastDepositingAmount; // m. Least Depositing Amount 
     }
 
     /// @dev deposit FIL to the contract, mint FLE
@@ -64,35 +66,35 @@
     ) external returns (uint256 amount);
 
     /// @dev borrow FIL from the contract
-    /// @param minerAddr miner address
+    /// @param minerId miner id
     /// @param amountFIL the amount of FIL user would like to borrow
     /// @param interestRate approximated interest rate at the point of request
     /// @param slippageTolr slippage tolerance
     /// @return amount actual FIL borrowed
     function borrow(
-        bytes memory minerAddr,
+        uint64 minerId,
         uint256 amountFIL,
         uint256 interestRate,
         uint256 slippageTolr
     ) external returns (uint256 amount);
 
     /// @dev payback principal and interest
-    /// @param minerAddr miner address
+    /// @param minerId miner id
     /// @param borrowId borrow id
     /// @return amount actual FIL repaid
-    function payback(bytes memory minerAddr, uint256 borrowId)
+    function payback(uint64 minerId, uint256 borrowId)
         external
         returns (uint256 amount);
 
     /// @dev staking miner : change beneficiary to contract , need owner for miner propose change beneficiary first
-    /// @param minerAddr miner address
+    /// @param minerId miner id
     /// @return flag result flag for change beneficiary
-    function stakingMiner(bytes memory minerAddr) external returns (bool);
+    function stakingMiner(uint64 minerId) external returns (bool);
 
     /// @dev unstaking miner : change beneficiary back to miner owner, need payback all first
-    /// @param minerAddr miner address
+    /// @param minerId miner id
     /// @return flag result flag for change beneficiary
-    function unstakingMiner(bytes memory minerAddr) external returns (bool);
+    function unstakingMiner(uint64 minerId) external returns (bool);
 
     /// @dev FLE balance of a user
     /// @param account user account
@@ -110,10 +112,10 @@
         view
         returns (MinerBorrowInfo[] memory infos);
 
-    /// @dev get staking miner info : minerAddr,quota,borrowCount,paybackCount,expiration
-    /// @param minerAddr miner address
+    /// @dev get staking miner info : minerId,quota,borrowCount,paybackCount,expiration
+    /// @param minerId miner id
     /// @return info return staking miner info
-    function getStakingMinerInfo(bytes memory minerAddr)
+    function getStakingMinerInfo(uint64 minerId)
         external
         view
         returns (MinerStakingInfo memory);
@@ -149,29 +151,29 @@
     event Redeem(address indexed account, uint256 amountFLE, uint256 amountFIL);
     /// @dev Emitted when user `account` borrows `amountFIL` with `minerId`
     event Borrow(
-        uint256 indexed id,
+        uint256 indexed borrowId,
         address indexed account,
-        bytes indexed minerAddr,
+        uint64 indexed minerId,
         uint256 amountFIL
     );
     /// @dev Emitted when user `account` repays `amount` FIL with `minerId`
     event Payback(
-        uint256 indexed id,
+        uint256 indexed borrowId,
         address indexed account,
-        bytes indexed minerAddr,
+        uint64 indexed minerId,
         uint256 amountFIL
     );
 
-    // / @dev Emitted when staking `minerAddr` : change beneficiary to `beneficiary` with info `quota`,`expiration`
+    // / @dev Emitted when staking `minerId` : change beneficiary to `beneficiary` with info `quota`,`expiration`
     event StakingMiner(
-        bytes minerAddr,
+        uint64 minerId,
         bytes beneficiary,
         uint256 quota,
         uint64 expiration
     );
-    // / @dev Emitted when unstaking `minerAddr` : change beneficiary to `beneficiary` with info `quota`,`expiration`
+    // / @dev Emitted when unstaking `minerId` : change beneficiary to `beneficiary` with info `quota`,`expiration`
     event UnstakingMiner(
-        bytes minerAddr,
+        uint64 minerId,
         bytes beneficiary,
         uint256 quota,
         uint64 expiration
